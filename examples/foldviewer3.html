@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>FOLD Viewer (Three.js)</title>
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 20px;
+  }
+  #controls {
+    margin-bottom: 10px;
+  }
+  select, input[type="file"] {
+    margin-right: 10px;
+  }
+</style>
+<!-- Three.js from CDN (r128 - last version with UMD builds) -->
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<!-- FOLD library -->
+<script type="text/javascript" src="../dist/fold.js"></script>
+<script type="text/javascript">
+  window.onload = function() {
+    var FOLD = require('fold');
+    var container = document.getElementById('viewer');
+
+    // Create the Three.js viewer
+    var view = FOLD.viewer3.addViewer(container, {
+      width: 600,
+      height: 600
+    });
+
+    // Example selector
+    var select = document.getElementById('examples');
+    select.onchange = function() {
+      if (select.value) {
+        FOLD.viewer3.importURL(select.value, view);
+      }
+    };
+
+    // File input
+    var fileInput = document.getElementById('fileInput');
+    fileInput.onchange = function() {
+      if (fileInput.files.length > 0) {
+        FOLD.viewer3.importFile(fileInput.files[0], view);
+      }
+    };
+
+    // Load default example
+    FOLD.viewer3.importURL('simple.fold', view);
+  };
+</script>
+</head>
+<body>
+<h3>FOLD Viewer (Three.js - WebGL)</h3>
+<div id="controls">
+  <label>Example:
+    <select id="examples">
+      <option value="simple.fold">Simple</option>
+      <option value="box.fold">Flexicube Unit</option>
+      <option value="squaretwist.fold">Square Twist</option>
+    </select>
+  </label>
+  <label>Import: <input type="file" id="fileInput" accept=".fold,.json"></label>
+</div>
+<div id="viewer"></div>
+<p style="color: #666; font-size: 12px;">
+  Controls: Left-click drag to rotate, scroll to zoom, right-click drag to pan.
+</p>
+<p style="text-align: right;">(C) Jason S. Ku 2016</p>
+</body>
+</html>

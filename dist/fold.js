@@ -3498,14 +3498,349 @@ viewer.update = function(view) {
 };
 
 
-},{"./geom":4}],"fold":[function(require,module,exports){
+},{"./geom":4}],7:[function(require,module,exports){
+// Three.js WebGL-based viewer for FOLD files
+// Requires Three.js to be loaded via script tag (includes OrbitControls)
+var COLORS, DEFAULTS, viewer3;
+
+viewer3 = exports;
+
+// Colors matching the SVG viewer styles
+COLORS = {
+  top: 0x00ffff, // cyan - front face
+  bot: 0xffff00, // yellow - back face
+  B: 0x000000, // black - boundary
+  M: 0xff0000, // red - mountain
+  V: 0x0000ff, // blue - valley
+  U: 0x888888, // gray - unassigned
+  F: 0x888888 // gray - flat
+};
+
+
+// Default visibility settings
+DEFAULTS = {
+  show: {
+    Faces: true,
+    Edges: true,
+    Vertices: false
+  }
+};
+
+/* UTILITIES */
+viewer3.appendHTML = function(el, tag, attrs) {
+  var child, k, v;
+  child = document.createElement(tag);
+  if (attrs != null) {
+    for (k in attrs) {
+      v = attrs[k];
+      child.setAttribute(k, v);
+    }
+  }
+  return el.appendChild(child);
+};
+
+/* INTERFACE */
+viewer3.addViewer = function(div, opts = {}) {
+  var OrbitControls, THREE, animate, aspect, checkbox, frustumSize, height, k, label, name, ref, ref1, ref2, toggleDiv, v, view, width;
+  THREE = window.THREE;
+  if (THREE == null) {
+    throw new Error('Three.js must be loaded before using viewer3');
+  }
+  view = {
+    opts: opts,
+    THREE: THREE
+  };
+  view.show = {};
+  ref = DEFAULTS.show;
+  for (k in ref) {
+    v = ref[k];
+    view.show[k] = v;
+  }
+  // Get container dimensions
+  width = (ref1 = opts.width) != null ? ref1 : 600;
+  height = (ref2 = opts.height) != null ? ref2 : 600;
+  // Create toggle UI
+  toggleDiv = viewer3.appendHTML(div, 'div', {
+    style: 'margin-bottom: 5px;'
+  });
+  toggleDiv.innerHTML = 'Toggle: ';
+  for (name in view.show) {
+    checkbox = viewer3.appendHTML(toggleDiv, 'input', {
+      type: 'checkbox',
+      value: name,
+      id: `toggle-${name}`
+    });
+    checkbox.checked = view.show[name];
+    label = viewer3.appendHTML(toggleDiv, 'label', {
+      for: `toggle-${name}`
+    });
+    label.innerHTML = `${name} `;
+    checkbox.onchange = (function(name) {
+      return function(e) {
+        view.show[name] = e.target.checked;
+        return viewer3.updateVisibility(view);
+      };
+    })(name);
+  }
+  // Create scene
+  view.scene = new THREE.Scene();
+  view.scene.background = new THREE.Color(0xffffff);
+  // Create orthographic camera
+  aspect = width / height;
+  frustumSize = 2;
+  view.camera = new THREE.OrthographicCamera(-frustumSize * aspect / 2, frustumSize * aspect / 2, frustumSize / 2, -frustumSize / 2, 0.1, 1000);
+  view.camera.position.set(0, 0, 5);
+  view.camera.lookAt(0, 0, 0);
+  // Create renderer
+  view.renderer = new THREE.WebGLRenderer({
+    antialias: true
+  });
+  view.renderer.setSize(width, height);
+  view.renderer.setPixelRatio(window.devicePixelRatio);
+  div.appendChild(view.renderer.domElement);
+  // Add orbit controls (from Three.js examples)
+  OrbitControls = THREE.OrbitControls;
+  if (OrbitControls != null) {
+    view.controls = new OrbitControls(view.camera, view.renderer.domElement);
+    view.controls.enableDamping = true;
+    view.controls.dampingFactor = 0.05;
+    view.controls.enablePan = true;
+    view.controls.enableZoom = true;
+  } else {
+    console.warn('OrbitControls not found. Mouse controls disabled.');
+    view.controls = {
+      update: function() {}
+    };
+  }
+  // Animation loop
+  animate = function() {
+    requestAnimationFrame(animate);
+    view.controls.update();
+    return view.renderer.render(view.scene, view.camera);
+  };
+  animate();
+  return view;
+};
+
+viewer3.updateVisibility = function(view) {
+  var ref, ref1, ref2;
+  if (view.model == null) {
+    return;
+  }
+  if ((ref = view.facesGroup) != null) {
+    ref.visible = view.show.Faces;
+  }
+  if ((ref1 = view.edgesGroup) != null) {
+    ref1.visible = view.show.Edges;
+  }
+  return (ref2 = view.verticesGroup) != null ? ref2.visible = view.show.Vertices : void 0;
+};
+
+viewer3.processInput = function(input, view) {
+  var THREE, assignment, backMaterial, backMesh, center, edge, edgeAssignments, edges, edgesByType, face, faces, frontMaterial, frontMesh, geometry, i, indices, j, l, len, len1, len2, len3, len4, len5, len6, lineGeometry, lineMaterial, linePositions, lines, m, max, min, modelScale, n, o, outline, p, positions, q, r, ref, ref1, ref2, ref3, sphere, transformedVerts, type, typeEdges, v, v1, v2, vertexGeometry, vertexMaterial, vertexOutlineMaterial, vertices;
+  THREE = view.THREE;
+  // Parse input
+  if (typeof input === 'string') {
+    view.fold = JSON.parse(input);
+  } else {
+    view.fold = input;
+  }
+  // Clear existing model
+  if (view.model != null) {
+    view.scene.remove(view.model);
+  }
+  // Create new model group
+  view.model = new THREE.Group();
+  view.facesGroup = new THREE.Group();
+  view.edgesGroup = new THREE.Group();
+  view.verticesGroup = new THREE.Group();
+  view.model.add(view.facesGroup);
+  view.model.add(view.edgesGroup);
+  view.model.add(view.verticesGroup);
+  // Build geometry
+  vertices = view.fold.vertices_coords;
+  faces = view.fold.faces_vertices;
+  edges = view.fold.edges_vertices;
+  edgeAssignments = view.fold.edges_assignment;
+  // Ensure 3D coordinates
+  vertices = (function() {
+    var j, len, results;
+    results = [];
+    for (j = 0, len = vertices.length; j < len; j++) {
+      v = vertices[j];
+      if (v.length === 2) {
+        results.push([v[0], v[1], 0]);
+      } else {
+        results.push(v);
+      }
+    }
+    return results;
+  })();
+  // Calculate bounding box for centering
+  min = [2e308, 2e308, 2e308];
+  max = [-2e308, -2e308, -2e308];
+  for (j = 0, len = vertices.length; j < len; j++) {
+    v = vertices[j];
+    ref = [0, 1, 2];
+    for (l = 0, len1 = ref.length; l < len1; l++) {
+      i = ref[l];
+      min[i] = Math.min(min[i], v[i]);
+      max[i] = Math.max(max[i], v[i]);
+    }
+  }
+  center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  modelScale = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  if (modelScale > 0) {
+    modelScale = 1.8 / modelScale;
+  }
+  // Store transformed vertices for reuse
+  transformedVerts = (function() {
+    var len2, m, results;
+    results = [];
+    for (m = 0, len2 = vertices.length; m < len2; m++) {
+      v = vertices[m];
+      results.push([(v[0] - center[0]) * modelScale, (v[1] - center[1]) * modelScale, (v[2] - center[2]) * modelScale]);
+    }
+    return results;
+  })();
+  // Create face geometry
+  if (faces != null) {
+    // Build indexed geometry
+    geometry = new THREE.BufferGeometry();
+    // Flatten vertices
+    positions = [];
+    for (m = 0, len2 = transformedVerts.length; m < len2; m++) {
+      v = transformedVerts[m];
+      positions.push(v[0], v[1], v[2]);
+    }
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    // Triangulate faces (simple fan triangulation)
+    indices = [];
+    for (n = 0, len3 = faces.length; n < len3; n++) {
+      face = faces[n];
+      if (face.length >= 3) {
+        for (i = o = 1, ref1 = face.length - 1; (1 <= ref1 ? o < ref1 : o > ref1); i = 1 <= ref1 ? ++o : --o) {
+          indices.push(face[0], face[i], face[i + 1]);
+        }
+      }
+    }
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    // Front face mesh (cyan)
+    frontMaterial = new THREE.MeshBasicMaterial({
+      color: COLORS.top,
+      side: THREE.FrontSide,
+      transparent: true,
+      opacity: 0.8,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1
+    });
+    frontMesh = new THREE.Mesh(geometry, frontMaterial);
+    view.facesGroup.add(frontMesh);
+    // Back face mesh (yellow)
+    backMaterial = new THREE.MeshBasicMaterial({
+      color: COLORS.bot,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.8,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1
+    });
+    backMesh = new THREE.Mesh(geometry.clone(), backMaterial);
+    view.facesGroup.add(backMesh);
+  }
+  // Create edge geometry
+  if (edges != null) {
+    // Group edges by assignment type
+    edgesByType = {};
+    for (i = p = 0, len4 = edges.length; p < len4; i = ++p) {
+      edge = edges[i];
+      assignment = (ref2 = edgeAssignments != null ? edgeAssignments[i] : void 0) != null ? ref2 : 'U';
+      if (edgesByType[assignment] == null) {
+        edgesByType[assignment] = [];
+      }
+      edgesByType[assignment].push(edge);
+    }
+// Create line segments for each type
+    for (type in edgesByType) {
+      typeEdges = edgesByType[type];
+      linePositions = [];
+      for (q = 0, len5 = typeEdges.length; q < len5; q++) {
+        edge = typeEdges[q];
+        v1 = transformedVerts[edge[0]];
+        v2 = transformedVerts[edge[1]];
+        linePositions.push(v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
+      }
+      lineGeometry = new THREE.BufferGeometry();
+      lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+      lineMaterial = new THREE.LineBasicMaterial({
+        color: (ref3 = COLORS[type]) != null ? ref3 : COLORS.U,
+        linewidth: 1
+      });
+      lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+      view.edgesGroup.add(lines);
+    }
+  }
+  // Create vertex geometry (small spheres)
+  if (vertices != null) {
+    vertexGeometry = new THREE.SphereGeometry(0.008, 6, 6);
+    vertexMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff
+    });
+    vertexOutlineMaterial = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      side: THREE.BackSide
+    });
+    for (r = 0, len6 = transformedVerts.length; r < len6; r++) {
+      v = transformedVerts[r];
+      // White sphere
+      sphere = new THREE.Mesh(vertexGeometry, vertexMaterial);
+      sphere.position.set(v[0], v[1], v[2]);
+      view.verticesGroup.add(sphere);
+      // Black outline (slightly larger back-face sphere)
+      outline = new THREE.Mesh(vertexGeometry, vertexOutlineMaterial);
+      outline.position.set(v[0], v[1], v[2]);
+      outline.scale.setScalar(1.4);
+      view.verticesGroup.add(outline);
+    }
+  }
+  view.scene.add(view.model);
+  // Apply initial visibility
+  viewer3.updateVisibility(view);
+  return view;
+};
+
+viewer3.importURL = function(url, view) {
+  return fetch(url).then(function(response) {
+    return response.text();
+  }).then(function(text) {
+    return viewer3.processInput(text, view);
+  }).catch(function(err) {
+    return console.error('Error loading FOLD file:', err);
+  });
+};
+
+viewer3.importFile = function(file, view) {
+  var reader;
+  reader = new FileReader();
+  reader.onload = function(e) {
+    return viewer3.processInput(e.target.result, view);
+  };
+  return reader.readAsText(file);
+};
+
+
+},{}],"fold":[function(require,module,exports){
 module.exports = {
   geom: require('./geom'),
   viewer: require('./viewer'),
+  viewer3: require('./viewer3'),
   filter: require('./filter'),
   convert: require('./convert'),
   file: require('./file')
 };
 
 
-},{"./convert":2,"./file":1,"./filter":3,"./geom":4,"./viewer":6}]},{},[]);
+},{"./convert":2,"./file":1,"./filter":3,"./geom":4,"./viewer":6,"./viewer3":7}]},{},[]);
